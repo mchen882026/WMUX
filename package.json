@@ -37,6 +37,7 @@
       "createDesktopShortcut": true,
       "runAfterFinish": true
     },
-    "publish": [{ "provider": "github", "owner": "YOUR-GITHUB-USERNAME", "repo": "wmux" }]
+    "publish": [{ "provider": "github", "owner": "mchen882026", "repo": "WMUX" }]
+    "npmRebuild": false
   }
 }
