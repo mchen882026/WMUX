@@ -26,7 +26,7 @@
     "productName": "wmux",
     "directories": { "output": "dist", "buildResources": "build" },
     "files": ["electron/**", "server.js", "public/**", "build/icon.png"],
-    "asarUnpack": ["node_modules/node-pty/**"],
+    "asarUnpack": ["node_modules/@homebridge/node-pty-prebuilt-multiarch/**"],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "build/icon.ico"
