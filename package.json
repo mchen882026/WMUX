@@ -1,0 +1,42 @@
+{
+  "name": "wmux",
+  "version": "0.2.0",
+  "description": "Run AI coding agents (Claude Code, Codex, Gemini) in parallel on Windows — workspaces, attention rings, git-worktree isolation, optional tmux persistence.",
+  "author": "Michael Chen",
+  "license": "MIT",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server.js",
+    "dist": "electron-builder --win",
+    "icon": "python build/gen_icon.py"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "express": "^4.21.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.wmux.app",
+    "productName": "wmux",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["electron/**", "server.js", "public/**", "build/icon.png"],
+    "asarUnpack": ["node_modules/node-pty/**"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
+    },
+    "publish": [{ "provider": "github", "owner": "YOUR-GITHUB-USERNAME", "repo": "wmux" }]
+  }
+}

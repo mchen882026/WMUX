@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wmux</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<style>
+  /* ── tokens ─────────────────────────────────────────────────────────── */
+  :root {
+    --bg0:#101318; --bg1:#151a21; --bg2:#1b222b; --line:#242d38;
+    --ink:#d9dfe7; --dim:#7c8794; --faint:#57616d;
+    --amber:#e8a13c;            /* one job only: an agent needs you        */
+    --run:#5b9fcb; --done:#6faf8b; --err:#ce6a6a;
+    --term-bg:#0c0f13;
+    --mono:"Cascadia Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html,body { height:100%; }
+  body {
+    font-family:var(--mono); font-size:13px; color:var(--ink);
+    background:var(--bg0); overflow:hidden;
+  }
+  button { font:inherit; color:inherit; background:none; border:none; cursor:pointer; }
+  button:focus-visible, input:focus-visible, label:focus-within .box { outline:1.5px solid var(--ink); outline-offset:2px; }
+  input[type=text] {
+    font:inherit; color:var(--ink); background:var(--bg0);
+    border:1px solid var(--line); border-radius:4px; padding:7px 9px; width:100%;
+  }
+  input[type=text]::placeholder { color:var(--faint); }
+
+  .app { display:flex; height:100%; }
+
+  /* ── sidebar rail ───────────────────────────────────────────────────── */
+  .rail {
+    width:300px; min-width:300px; background:var(--bg1);
+    border-right:1px solid var(--line); display:flex; flex-direction:column;
+  }
+  .brand { padding:16px 16px 12px; display:flex; align-items:baseline; gap:2px; }
+  .brand b { font-size:16px; font-weight:600; letter-spacing:.04em; }
+  .cursorblock {
+    display:inline-block; width:8px; height:14px; background:var(--amber);
+    transform:translateY(2px); animation:blink 1.2s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity:0; } }
+
+  .newbtn {
+    margin:0 12px 10px; padding:8px 10px; text-align:left;
+    border:1px solid var(--line); border-radius:5px; color:var(--dim);
+  }
+  .newbtn:hover { color:var(--ink); border-color:var(--dim); }
+  .newbtn kbd { float:right; color:var(--faint); }
+
+  .cards { flex:1; overflow-y:auto; padding:0 8px 8px; }
+  .card {
+    width:100%; text-align:left; padding:9px 10px; border-radius:6px;
+    display:grid; grid-template-columns:16px 1fr auto; column-gap:8px; row-gap:2px;
+    align-items:center; border:1px solid transparent;
+  }
+  .card:hover { background:var(--bg2); }
+  .card.sel { background:var(--bg2); border-color:var(--line); }
+  .card .title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .meta, .card .tail {
+    grid-column:2 / 4; color:var(--dim); font-size:11.5px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .card .tail { color:var(--faint); }
+  .chip { font-size:10px; color:var(--faint); border:1px solid var(--line); border-radius:3px; padding:1px 4px; }
+
+  .dot { width:8px; height:8px; border-radius:50%; position:relative; justify-self:center; }
+  .dot.running { background:var(--run); }
+  .dot.attention { background:var(--amber); }
+  .dot.done { background:var(--done); }
+  .dot.error { background:var(--err); }
+  .dot.stopped { background:var(--faint); }
+  /* the signature: an amber ring that radiates while an agent waits on you */
+  .card.ring .dot::after {
+    content:""; position:absolute; inset:-3px; border-radius:50%;
+    border:1.5px solid var(--amber); animation:ring 1.6s ease-out infinite;
+  }
+  @keyframes ring {
+    from { transform:scale(.6); opacity:1; }
+    to   { transform:scale(2.1); opacity:0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cursorblock { animation:none; }
+    .card.ring .dot::after { animation:none; transform:none; opacity:.9; }
+  }
+
+  .railfoot { padding:10px 16px; border-top:1px solid var(--line); color:var(--faint); font-size:11px; }
+
+  /* ── main pane ──────────────────────────────────────────────────────── */
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .bar {
+    height:46px; display:flex; align-items:center; gap:14px; padding:0 14px;
+    background:var(--bg1); border-bottom:1px solid var(--line);
+  }
+  .bar .name { font-weight:600; }
+  .bar .sub { color:var(--dim); font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar .spacer { flex:1; }
+  .barbtn { color:var(--dim); padding:5px 8px; border-radius:4px; }
+  .barbtn:hover { color:var(--ink); background:var(--bg2); }
+  .barbtn.danger:hover { color:var(--err); }
+
+  .termwrap { flex:1; position:relative; background:var(--term-bg); }
+  .termhost { position:absolute; inset:0; padding:8px 4px 4px 10px; display:none; }
+  .termhost.show { display:block; }
+
+  .empty {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:10px; color:var(--dim);
+  }
+  .empty .big { color:var(--ink); font-size:15px; }
+  .empty button { border:1px solid var(--line); border-radius:5px; padding:8px 14px; }
+  .empty button:hover { border-color:var(--dim); }
+
+  /* ── modals ─────────────────────────────────────────────────────────── */
+  .veil {
+    position:fixed; inset:0; background:rgba(8,10,13,.6);
+    display:none; align-items:flex-start; justify-content:center; padding-top:12vh;
+  }
+  .veil.show { display:flex; }
+  .modal {
+    width:480px; max-width:92vw; background:var(--bg2); border:1px solid var(--line);
+    border-radius:8px; padding:18px;
+  }
+  .modal h2 { font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin-bottom:14px; }
+  .field { margin-bottom:12px; }
+  .field label { display:block; color:var(--dim); font-size:11.5px; margin-bottom:5px; }
+  .row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .row label { display:flex; gap:6px; align-items:center; color:var(--ink); font-size:12.5px; cursor:pointer; }
+  .hint { color:var(--faint); font-size:11px; margin-top:4px; line-height:1.5; }
+  .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .actions .go { border:1px solid var(--dim); border-radius:5px; padding:7px 14px; }
+  .actions .go:hover { border-color:var(--ink); }
+  .actions .quiet { color:var(--dim); padding:7px 10px; }
+  .err { color:var(--err); font-size:12px; margin-top:10px; display:none; }
+  pre.diff {
+    background:var(--bg0); border:1px solid var(--line); border-radius:5px;
+    padding:10px; max-height:50vh; overflow:auto; font-size:12px; color:var(--dim); white-space:pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <div class="brand"><b>wmux</b><span class="cursorblock"></span></div>
+    <button class="newbtn" id="btnNew">+ new workspace <kbd>n</kbd></button>
+    <div class="cards" id="cards"></div>
+    <div class="railfoot" id="foot">checking backends…</div>
+  </nav>
+
+  <main class="main">
+    <div class="bar" id="bar" style="visibility:hidden">
+      <span class="name" id="barName"></span>
+      <span class="sub" id="barSub"></span>
+      <span class="spacer"></span>
+      <button class="barbtn" id="btnRestart" style="display:none">restart agent</button>
+      <button class="barbtn" id="btnDiff">changes</button>
+      <button class="barbtn" id="btnFolder">folder</button>
+      <button class="barbtn" id="btnCode">vs code</button>
+      <button class="barbtn danger" id="btnKill">kill</button>
+    </div>
+    <div class="termwrap" id="termwrap">
+      <div class="empty" id="empty">
+        <div class="big">No workspaces yet.</div>
+        <div>Each workspace runs one agent on one task, side by side.</div>
+        <button id="btnNew2">Create the first one</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- new workspace -->
+<div class="veil" id="veilNew">
+  <div class="modal">
+    <h2>New workspace</h2>
+    <div class="field"><label for="fTitle">Task title</label>
+      <input type="text" id="fTitle" placeholder="fix login bug" /></div>
+    <div class="field"><label for="fRepo">Repository folder</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="fRepo" placeholder="C:\Users\you\code\myproject" />
+        <button class="go" id="btnBrowse" style="display:none;white-space:nowrap">Browse…</button>
+      </div></div>
+    <div class="field"><label for="fAgent">Agent command</label>
+      <input type="text" id="fAgent" value="claude" />
+      <div class="hint">Anything that runs in a terminal: claude, codex, gemini, or just a shell (leave blank).</div></div>
+    <div class="field"><label>Session backend</label>
+      <div class="row">
+        <label><input type="radio" name="fBack" value="native" checked /> Windows native</label>
+        <label><input type="radio" name="fBack" value="tmux" /> tmux via WSL</label>
+      </div>
+      <div class="hint">tmux mode keeps the agent alive even if you close this app; reopen a workspace with the same title to reattach. Requires WSL with tmux and the agent installed inside it.</div></div>
+    <div class="field">
+      <div class="row"><label><input type="checkbox" id="fWt" checked /> Isolate in a git worktree</label></div>
+      <div class="hint">Gives this task its own copy of the repo on branch wmux/&lt;task&gt;, so parallel agents never edit the same files.</div></div>
+    <div class="err" id="newErr"></div>
+    <div class="actions">
+      <button class="quiet" data-close>Cancel</button>
+      <button class="go" id="btnCreate">Create workspace</button>
+    </div>
+  </div>
+</div>
+
+<!-- kill -->
+<div class="veil" id="veilKill">
+  <div class="modal">
+    <h2>Kill workspace</h2>
+    <div id="killWhat" style="margin-bottom:12px"></div>
+    <div class="row" style="flex-direction:column; align-items:flex-start; gap:8px">
+      <label id="killWtRow"><input type="checkbox" id="kWt" /> Delete its worktree and branch too</label>
+      <label id="killTmRow"><input type="checkbox" id="kTm" /> Kill the tmux session too (otherwise it keeps running in WSL)</label>
+    </div>
+    <div class="actions">
+      <button class="quiet" data-close>Cancel</button>
+      <button class="go" id="btnKillGo">Kill</button>
+    </div>
+  </div>
+</div>
+
+<!-- diff -->
+<div class="veil" id="veilDiff">
+  <div class="modal">
+    <h2>Changes since <span id="diffBase"></span></h2>
+    <pre class="diff" id="diffBody"></pre>
+    <div class="actions"><button class="go" data-close>Close</button></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { list: [], sel: null, prev: {}, terms: new Map() };
+
+const THEME = {
+  background:"#0c0f13", foreground:"#d9dfe7", cursor:"#e8a13c", cursorAccent:"#0c0f13",
+  selectionBackground:"rgba(232,161,60,.25)",
+  black:"#1b222b", red:"#ce6a6a", green:"#6faf8b", yellow:"#e8a13c",
+  blue:"#5b9fcb", magenta:"#a98bc4", cyan:"#6bb3ad", white:"#d9dfe7",
+  brightBlack:"#57616d", brightRed:"#dd8383", brightGreen:"#8cc2a4",
+  brightYellow:"#f0b45f", brightBlue:"#7cb2d8", brightMagenta:"#bda2d4",
+  brightCyan:"#86c4be", brightWhite:"#eef1f5"
+};
+const STATUS_WORD = { running:"running", attention:"needs you", done:"done", error:"failed", stopped:"stopped" };
+
+/* ── terminals ─────────────────────────────────────────────────────────── */
+function ensureTerm(w) {
+  if (state.terms.has(w.id)) return state.terms.get(w.id);
+  const el = document.createElement("div");
+  el.className = "termhost";
+  $("termwrap").appendChild(el);
+  const term = new Terminal({
+    fontFamily:'"Cascadia Mono","Cascadia Code",Consolas,monospace',
+    fontSize:13, theme:THEME, cursorBlink:true, scrollback:5000
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(el);
+  const t = { term, fit, el, ws:null, closed:false };
+  connect(w.id, t);
+  term.onData((d) => { if (t.ws && t.ws.readyState === 1) t.ws.send(JSON.stringify({ t:"in", d })); });
+  term.onResize(({cols, rows}) => { if (t.ws && t.ws.readyState === 1) t.ws.send(JSON.stringify({ t:"rs", c:cols, r:rows })); });
+  state.terms.set(w.id, t);
+  return t;
+}
+function connect(id, t) {
+  const ws = new WebSocket(`ws://${location.host}/term?id=${id}`);
+  t.ws = ws;
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.t === "d") t.term.write(m.d);
+    if (m.t === "exit") t.term.write(`\r\n\x1b[2m[wmux] process exited (${m.code})\x1b[0m\r\n`);
+  };
+  ws.onclose = () => {
+    const w = state.list.find((x) => x.id === id);
+    if (w && w.alive && !t.closed) setTimeout(() => connect(id, t), 2000);
+  };
+}
+function fitSel() {
+  const t = state.sel && state.terms.get(state.sel);
+  if (t) { try { t.fit.fit(); } catch {} }
+}
+let rT; window.addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(fitSel, 120); });
+
+/* ── sidebar / selection ───────────────────────────────────────────────── */
+function select(id) {
+  state.sel = id;
+  const w = state.list.find((x) => x.id === id);
+  if (!w) return;
+  for (const [tid, t] of state.terms) t.el.classList.toggle("show", tid === id);
+  ensureTerm(w).el.classList.add("show");
+  $("empty").style.display = "none";
+  $("bar").style.visibility = "visible";
+  $("barName").textContent = w.title;
+  $("barSub").textContent = `\u2387 ${w.branch} · ${w.dir}` + (w.tmuxSession ? ` · tmux:${w.tmuxSession}` : "");
+  $("btnRestart").style.display = w.alive ? "none" : "";
+  if (w.ring) fetch(`/api/workspaces/${id}/ack`, { method:"POST" });
+  requestAnimationFrame(() => { fitSel(); state.terms.get(id).term.focus(); });
+  render();
+}
+function render() {
+  const c = $("cards");
+  c.innerHTML = "";
+  for (const w of state.list) {
+    const b = document.createElement("button");
+    b.className = "card" + (w.id === state.sel ? " sel" : "") + (w.ring && w.id !== state.sel ? " ring" : "");
+    b.innerHTML =
+      `<span class="dot ${w.status}"></span>` +
+      `<span class="title"></span>` +
+      `<span class="chip">${w.backend === "tmux" ? "tmux" : "win"}</span>` +
+      `<span class="meta">\u2387 ${esc(w.branch)} · ${esc(STATUS_WORD[w.status] || w.status)}</span>` +
+      `<span class="tail"></span>`;
+    b.querySelector(".title").textContent = w.title;
+    b.querySelector(".tail").textContent = w.lastLine || " ";
+    b.onclick = () => select(w.id);
+    c.appendChild(b);
+  }
+  const n = state.list.filter((w) => w.status === "attention" || (w.ring && w.status !== "running")).length;
+  document.title = n ? `(${n}) wmux` : "wmux";
+}
+function esc(s){ const d=document.createElement("span"); d.textContent=s||""; return d.innerHTML; }
+
+/* ── polling + notifications ───────────────────────────────────────────── */
+async function poll() {
+  try {
+    const list = await (await fetch("/api/workspaces")).json();
+    state.list = list;
+    for (const w of list) {
+      const p = state.prev[w.id];
+      if (p && p !== w.status && ["attention","done","error"].includes(w.status)) {
+        if ((document.hidden || w.id !== state.sel) && Notification.permission === "granted")
+          new Notification(`wmux — ${w.title}`, { body: STATUS_WORD[w.status] + (w.lastLine ? `\n${w.lastLine}` : "") });
+      }
+      state.prev[w.id] = w.status;
+    }
+    if (state.sel) {
+      const w = list.find((x) => x.id === state.sel);
+      if (w) {
+        $("barSub").textContent = `\u2387 ${w.branch} · ${w.dir}` + (w.tmuxSession ? ` · tmux:${w.tmuxSession}` : "");
+        $("btnRestart").style.display = w.alive ? "none" : "";
+      }
+    }
+    render();
+  } catch {}
+  setTimeout(poll, 2000);
+}
+
+/* ── modals ────────────────────────────────────────────────────────────── */
+function openVeil(id){ $(id).classList.add("show"); }
+function closeVeils(){ document.querySelectorAll(".veil").forEach((v)=>v.classList.remove("show")); }
+document.querySelectorAll("[data-close]").forEach((b)=> b.onclick = closeVeils);
+document.addEventListener("keydown",(e)=>{
+  if (e.key === "Escape") closeVeils();
+  if (e.key === "n" && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== "INPUT"
+      && !document.querySelector(".veil.show") && !(document.activeElement.closest && document.activeElement.closest(".termhost"))) {
+    e.preventDefault(); newModal();
+  }
+});
+function newModal(){
+  $("newErr").style.display = "none";
+  $("fRepo").value = localStorage.wmuxRepo || "";
+  $("fAgent").value = localStorage.wmuxAgent || "claude";
+  openVeil("veilNew");
+  $("fTitle").value = ""; $("fTitle").focus();
+}
+$("btnNew").onclick = newModal;
+$("btnNew2").onclick = newModal;
+$("veilNew").addEventListener("keydown",(e)=>{ if (e.key === "Enter") $("btnCreate").click(); });
+
+$("btnCreate").onclick = async () => {
+  if (Notification.permission === "default") Notification.requestPermission();
+  const body = {
+    title: $("fTitle").value || "task",
+    repo: $("fRepo").value,
+    agent: $("fAgent").value,
+    backend: document.querySelector('input[name="fBack"]:checked').value,
+    useWorktree: $("fWt").checked
+  };
+  localStorage.wmuxRepo = body.repo; localStorage.wmuxAgent = body.agent;
+  const r = await fetch("/api/workspaces", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) { $("newErr").textContent = j.error; $("newErr").style.display = "block"; return; }
+  closeVeils();
+  state.list.push(j); state.prev[j.id] = j.status;
+  select(j.id);
+};
+
+$("btnKill").onclick = () => {
+  const w = state.list.find((x)=>x.id===state.sel); if (!w) return;
+  $("killWhat").textContent = `“${w.title}” — the agent process will stop.`;
+  $("killWtRow").style.display = w.isWorktree ? "" : "none";
+  $("killTmRow").style.display = w.tmuxSession ? "" : "none";
+  $("kWt").checked = false; $("kTm").checked = false;
+  openVeil("veilKill");
+};
+$("btnKillGo").onclick = async () => {
+  const id = state.sel;
+  const q = `?removeWorktree=${$("kWt").checked ? 1 : 0}&killTmux=${$("kTm").checked ? 1 : 0}`;
+  await fetch(`/api/workspaces/${id}${q}`, { method:"DELETE" });
+  closeVeils();
+  const t = state.terms.get(id);
+  if (t) { t.closed = true; try { t.ws.close(); } catch{}; t.term.dispose(); t.el.remove(); state.terms.delete(id); }
+  state.list = state.list.filter((x)=>x.id!==id);
+  state.sel = null;
+  $("bar").style.visibility = "hidden";
+  if (state.list.length) select(state.list[0].id);
+  else $("empty").style.display = "flex";
+  render();
+};
+
+$("btnDiff").onclick = async () => {
+  const j = await (await fetch(`/api/workspaces/${state.sel}/diff`)).json();
+  $("diffBase").textContent = j.baseRef;
+  $("diffBody").textContent = j.stat + (j.untracked ? `\n\nnew files:\n${j.untracked}` : "");
+  openVeil("veilDiff");
+};
+$("btnFolder").onclick = () => fetch(`/api/workspaces/${state.sel}/open`, { method:"POST", headers:{ "Content-Type":"application/json" }, body:'{"app":"explorer"}' });
+$("btnCode").onclick   = () => fetch(`/api/workspaces/${state.sel}/open`, { method:"POST", headers:{ "Content-Type":"application/json" }, body:'{"app":"code"}' });
+
+$("btnRestart").onclick = async () => {
+  const r = await fetch(`/api/workspaces/${state.sel}/restart`, { method:"POST" });
+  if (r.ok) { $("btnRestart").style.display = "none"; const t = state.terms.get(state.sel); if (t) t.term.focus(); }
+};
+
+/* ── boot ──────────────────────────────────────────────────────────────── */
+if (window.wmuxNative) {
+  $("btnBrowse").style.display = "";
+  $("btnBrowse").onclick = async () => {
+    const p = await window.wmuxNative.pickFolder();
+    if (p) $("fRepo").value = p;
+  };
+}
+fetch("/api/health").then((r)=>r.json()).then((h)=>{
+  $("foot").textContent =
+    `git ${h.git ? "✓" : "✗ install git-scm.com"} · claude ${h.claude ? "✓" : "—"} · tmux via wsl ${h.tmuxInWsl ? "✓" : "—"}`;
+}).catch(()=>{ $("foot").textContent = "server unreachable"; });
+poll();
+</script>
+</body>
+</html>
