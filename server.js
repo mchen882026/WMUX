@@ -33,7 +33,7 @@ const { WebSocketServer } = require("ws");
 // step failed, give a plain-English pointer instead of a cryptic stack.
 let pty;
 try {
-  pty = require("node-pty");
+  pty = require("@homebridge/node-pty-prebuilt-multiarch");
 } catch (e) {
   console.error(
     "\n[wmux] Could not load node-pty (the terminal engine).\n" +
